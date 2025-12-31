@@ -1,0 +1,137 @@
+#!/bin/bash
+
+#
+# url2booklet
+# Convert a URL to a booklet-formatted PDF
+# Usage: url2booklet <url>
+#
+
+set -euo pipefail
+
+# Configuration
+SCRIPT_DIR="$HOME/.local/bin/url2booklet-lib"
+OUTPUT_DIR="${URL2BOOKLET_OUTPUT_DIR:-$HOME/Downloads/booklets}"
+TEMP_DIR=$(mktemp -d)
+PAPER_SIZE="${URL2BOOKLET_PAPER_SIZE:-letter}"
+AUTO_OPEN="${URL2BOOKLET_AUTO_OPEN:-true}"
+
+# Cleanup on exit
+trap "rm -rf '$TEMP_DIR'" EXIT
+
+# Check for required argument
+if [ $# -eq 0 ]; then
+    echo "Usage: url2booklet <url>" >&2
+    echo "" >&2
+    echo "Converts a web page to a booklet-formatted PDF for printing." >&2
+    echo "Output saved to: $OUTPUT_DIR" >&2
+    exit 1
+fi
+
+URL="$1"
+
+# Validate URL
+if [[ ! "$URL" =~ ^https?:// ]]; then
+    echo "Error: Invalid URL: $URL" >&2
+    echo "URL must start with http:// or https://" >&2
+    exit 1
+fi
+
+# Create output directory
+mkdir -p "$OUTPUT_DIR"
+
+# Check disk space (require at least 100MB free)
+FREE_SPACE=$(df -k "$OUTPUT_DIR" 2>/dev/null | tail -1 | awk '{print $4}' || echo "0")
+if [ "$FREE_SPACE" -lt 102400 ]; then
+    echo "Error: Insufficient disk space (need at least 100MB)" >&2
+    exit 1
+fi
+
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "URL to Booklet PDF Converter"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "URL: $URL"
+echo ""
+
+# Step 1: Extract content
+echo "Step 1/4: Extracting readable content..."
+CONTENT_JSON="$TEMP_DIR/content.json"
+
+if ! node "$SCRIPT_DIR/extract-content.js" "$URL" > "$CONTENT_JSON"; then
+    echo "" >&2
+    echo "Error: Failed to extract content from URL" >&2
+    echo "The URL may be unreachable, require authentication, or not contain readable content." >&2
+    exit 1
+fi
+
+# Get title for filename
+TITLE=$(jq -r '.title' "$CONTENT_JSON" | sed 's/[^a-zA-Z0-9 ]/-/g' | sed 's/--*/-/g' | tr -s ' ' '-' | cut -c1-50)
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+FILENAME="${TITLE}-${TIMESTAMP}"
+
+# Generate intermediate HTML
+HTML_FILE="$TEMP_DIR/content.html"
+jq -r '.content' "$CONTENT_JSON" > "$HTML_FILE"
+
+# Check content length
+CONTENT_LENGTH=$(wc -c < "$HTML_FILE")
+if [ "$CONTENT_LENGTH" -lt 100 ]; then
+    echo "" >&2
+    echo "Warning: Extracted content is very short (${CONTENT_LENGTH} bytes)" >&2
+    echo "The page may have anti-scraping measures or require JavaScript." >&2
+fi
+
+echo "   Title: $(jq -r '.title' "$CONTENT_JSON")"
+if [ "$(jq -r '.byline' "$CONTENT_JSON")" != "null" ] && [ -n "$(jq -r '.byline' "$CONTENT_JSON")" ]; then
+    echo "   Author: $(jq -r '.byline' "$CONTENT_JSON")"
+fi
+echo ""
+
+# Step 2: Render PDF
+echo "Step 2/4: Rendering PDF..."
+PDF_FILE="$TEMP_DIR/${FILENAME}.pdf"
+
+if ! node "$SCRIPT_DIR/render-pdf.js" "$HTML_FILE" "$PDF_FILE" 2>&1; then
+    echo "" >&2
+    echo "Error: Failed to render PDF" >&2
+    exit 1
+fi
+
+echo ""
+
+# Step 3: Create booklet
+echo "Step 3/4: Creating booklet..."
+BOOKLET_FILE="$OUTPUT_DIR/${FILENAME}-booklet.pdf"
+
+if ! bash "$SCRIPT_DIR/bookletize.sh" "$PDF_FILE" "$BOOKLET_FILE" 2>&1; then
+    echo "" >&2
+    echo "Error: Failed to create booklet" >&2
+    exit 1
+fi
+
+echo ""
+
+# Step 4: Finish
+echo "Step 4/4: Finalizing..."
+FILE_SIZE=$(du -h "$BOOKLET_FILE" | cut -f1)
+PAGE_COUNT=$(pdftk "$BOOKLET_FILE" dump_data 2>/dev/null | grep NumberOfPages | awk '{print $2}' || echo "?")
+
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "✓ Booklet created successfully!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "   File: $BOOKLET_FILE"
+echo "   Size: $FILE_SIZE"
+echo "   Pages: $PAGE_COUNT"
+echo ""
+echo "Printing instructions:"
+echo "  1. Print double-sided (flip on short edge)"
+echo "  2. Fold in half"
+echo "  3. Staple along the spine"
+echo ""
+
+# Open PDF if requested
+if [ "$AUTO_OPEN" = "true" ]; then
+    open "$BOOKLET_FILE"
+fi
