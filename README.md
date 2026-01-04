@@ -7,6 +7,7 @@ Convert any web page to a beautifully formatted booklet PDF, ready for double-si
 - **Reader Mode Extraction**: Uses Mozilla's Readability algorithm to extract clean article content
 - **Professional Typography**: Print-optimized CSS with readable fonts and proper page breaks
 - **2-Up Landscape Booklets**: Automatically creates landscape pages with 2 pages side by side
+- **Multi-Signature Support**: Automatically splits longer documents into multiple signatures for easier binding
 - **Safari Integration**: Works directly from Safari's share sheet
 - **Automatic Page Ordering**: Pages arranged for proper booklet assembly after printing
 - **Smart Padding**: Automatically adds blank pages to ensure proper booklet folding
@@ -20,9 +21,17 @@ Convert any web page to a beautifully formatted booklet PDF, ready for double-si
 
 ## Example Output
 
-Input: 22-page article → Output: 12 landscape sheets (2-up)
+**Short Documents (≤ 32 pages):**
+Input: 22-page article → Output: 1 booklet PDF with 12 landscape sheets (2-up)
 
-When printed double-sided, folded in half, and stapled, you get a professional booklet!
+**Long Documents (> 32 pages):**
+Input: 100-page article → Output: 4 signature PDFs (32 pages each)
+- signature-1.pdf: 16 landscape sheets
+- signature-2.pdf: 16 landscape sheets
+- signature-3.pdf: 16 landscape sheets
+- signature-4.pdf: 4 landscape sheets
+
+When printed double-sided, folded in half, and bound together, you get a professional multi-signature booklet!
 
 ## Requirements
 
@@ -120,11 +129,38 @@ mkdir -p ~/Downloads/booklets
 
 ### Command Line
 
+**Basic usage:**
 ```bash
 url2booklet "https://example.com/article"
 ```
 
-The booklet PDF will be created in `~/Downloads/booklets/` and automatically opened.
+The booklet PDF(s) will be created in `~/Downloads/booklets/` and automatically opened.
+
+**Multi-signature mode (default):**
+```bash
+# Uses 32 pages per signature (8 sheets each)
+url2booklet "https://example.com/long-article"
+```
+
+**Custom signature size:**
+```bash
+# Use 16 pages per signature (4 sheets each)
+url2booklet -s 16 "https://example.com/article"
+
+# Use 64 pages per signature (16 sheets each)
+url2booklet --signature-size 64 "https://example.com/article"
+```
+
+**Single continuous booklet (legacy mode):**
+```bash
+# Create one large booklet regardless of length
+url2booklet --single-booklet "https://example.com/article"
+```
+
+**View help:**
+```bash
+url2booklet --help
+```
 
 ### Safari Integration
 
@@ -156,6 +192,8 @@ The booklet PDF will be created in `~/Downloads/booklets/` and automatically ope
 
 ## Printing Instructions
 
+### Single Booklet (Short Documents)
+
 Once your booklet PDF is created:
 
 1. **Print Settings**:
@@ -173,6 +211,29 @@ Once your booklet PDF is created:
    - A professional-looking booklet with pages in correct order
    - Ready to read!
 
+### Multi-Signature Booklets (Long Documents)
+
+When multiple signature files are created:
+
+1. **Print Each Signature**:
+   - Print each `-sig1.pdf`, `-sig2.pdf`, etc. separately
+   - Use same settings: double-sided, flip on short edge, landscape
+
+2. **Fold Each Signature**:
+   - Take all sheets for signature 1, fold in half
+   - Repeat for signature 2, 3, etc.
+   - Each signature becomes a separate folded booklet
+
+3. **Bind Signatures Together**:
+   - **Option A**: Saddle-stitch each signature separately, then glue/tape the spines together
+   - **Option B**: Nest all signatures together and bind as one (perfect binding or sewn binding)
+   - **Option C**: Use binder clips or rubber bands to hold signatures together
+
+4. **Result**:
+   - A professional multi-signature book
+   - Much easier to fold and bind than one thick booklet
+   - Pages in correct reading order across all signatures
+
 ## Configuration
 
 ### Environment Variables
@@ -180,6 +241,9 @@ Once your booklet PDF is created:
 Customize behavior by setting these environment variables in your `~/.zshrc`:
 
 ```bash
+# Signature size (default: 32 pages = 8 sheets)
+export URL2BOOKLET_SIGNATURE_SIZE="32"  # or "16", "64", "0" for single booklet
+
 # Paper size (default: letter)
 export URL2BOOKLET_PAPER_SIZE="letter"  # or "a4paper"
 
@@ -195,6 +259,23 @@ export URL2BOOKLET_MARGIN="0.5in"
 # Font size (default: 11pt)
 export URL2BOOKLET_FONT_SIZE="11pt"
 ```
+
+### Signature Size Guide
+
+Choose the right signature size based on your binding method:
+
+| Signature Size | Sheets per Signature | Best For |
+|---|---|---|
+| 16 pages | 4 sheets | Thin paper, compact booklets |
+| **32 pages** | **8 sheets** | **Standard (recommended)** |
+| 64 pages | 16 sheets | Maximum for saddle-stitch |
+| 0 (disabled) | All pages | Single continuous booklet (legacy mode) |
+
+**Why use signatures?**
+- **Easier folding**: 8 sheets fold much easier than 30+ sheets
+- **Better binding**: Professional bookbinding uses signatures
+- **Practical**: Each signature can be saddle-stitched separately
+- **Industry standard**: Most printed books use 32-page signatures
 
 ## Project Structure
 
@@ -224,6 +305,17 @@ The bookletization process arranges pages so they read correctly when folded:
 - **Sheet 2 (back)**: [Page 4, Page 5]
 
 When printed double-sided, folded, and stapled, pages 1-8 read in order!
+
+### Multi-Signature Example
+
+**100-page document with 32-page signatures:**
+
+1. **Signature 1** (pages 1-32): 8 landscape sheets → folded booklet
+2. **Signature 2** (pages 33-64): 8 landscape sheets → folded booklet
+3. **Signature 3** (pages 65-96): 8 landscape sheets → folded booklet
+4. **Signature 4** (pages 97-100 + 28 blank pages): 8 landscape sheets → folded booklet
+
+Each signature is independently bookletized. When stacked in order (sig1, sig2, sig3, sig4), the pages read sequentially from 1-100.
 
 ## Troubleshooting
 
@@ -308,6 +400,16 @@ URL2BOOKLET_OUTPUT_DIR="/tmp/my-booklets" url2booklet "https://example.com"
 URL2BOOKLET_AUTO_OPEN=false url2booklet "https://example.com"
 ```
 
+### Custom Signature Size
+
+```bash
+# Use 16-page signatures
+URL2BOOKLET_SIGNATURE_SIZE=16 url2booklet "https://example.com"
+
+# Disable signatures (single booklet)
+URL2BOOKLET_SIGNATURE_SIZE=0 url2booklet "https://example.com"
+```
+
 ## Technical Details
 
 ### Content Extraction
@@ -326,10 +428,13 @@ Puppeteer (headless Chrome) renders the extracted content with custom CSS optimi
 ### Booklet Creation
 
 Python script using pypdf library:
-1. Pads document to multiple of 4 pages
-2. Creates landscape pages (2× original width)
-3. Places two pages side by side
-4. Reorders pages for proper booklet folding
+1. Splits long documents into signatures (default: 32 pages each)
+2. For each signature:
+   - Pads to multiple of 4 pages
+   - Creates landscape pages (2× original width)
+   - Places two pages side by side
+   - Reorders pages for proper booklet folding
+3. Outputs separate PDF for each signature
 
 ## Credits
 
