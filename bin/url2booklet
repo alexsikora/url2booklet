@@ -14,20 +14,78 @@ OUTPUT_DIR="${URL2BOOKLET_OUTPUT_DIR:-$HOME/Downloads/booklets}"
 TEMP_DIR=$(mktemp -d)
 PAPER_SIZE="${URL2BOOKLET_PAPER_SIZE:-letter}"
 AUTO_OPEN="${URL2BOOKLET_AUTO_OPEN:-true}"
+SIGNATURE_SIZE="${URL2BOOKLET_SIGNATURE_SIZE:-32}"  # Default 32 pages per signature (8 sheets)
 
 # Cleanup on exit
 trap "rm -rf '$TEMP_DIR'" EXIT
 
 # Check for required argument
 if [ $# -eq 0 ]; then
-    echo "Usage: url2booklet <url>" >&2
+    echo "Usage: url2booklet [options] <url>" >&2
     echo "" >&2
     echo "Converts a web page to a booklet-formatted PDF for printing." >&2
+    echo "" >&2
+    echo "Options:" >&2
+    echo "  -s, --signature-size N    Pages per signature (default: 32)" >&2
+    echo "  --single-booklet          Create one continuous booklet (no signatures)" >&2
+    echo "  -h, --help                Show this help message" >&2
+    echo "" >&2
+    echo "Environment Variables:" >&2
+    echo "  URL2BOOKLET_SIGNATURE_SIZE    Default signature size (default: 32)" >&2
+    echo "  URL2BOOKLET_OUTPUT_DIR        Output directory" >&2
+    echo "  URL2BOOKLET_AUTO_OPEN         Auto-open PDF (true/false)" >&2
+    echo "" >&2
     echo "Output saved to: $OUTPUT_DIR" >&2
     exit 1
 fi
 
-URL="$1"
+# Parse options
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -s|--signature-size)
+            SIGNATURE_SIZE="$2"
+            shift 2
+            ;;
+        --single-booklet)
+            SIGNATURE_SIZE="0"
+            shift
+            ;;
+        -h|--help)
+            echo "Usage: url2booklet [options] <url>" >&2
+            echo "" >&2
+            echo "Converts a web page to a booklet-formatted PDF for printing." >&2
+            echo "" >&2
+            echo "Options:" >&2
+            echo "  -s, --signature-size N    Pages per signature (default: 32)" >&2
+            echo "  --single-booklet          Create one continuous booklet (no signatures)" >&2
+            echo "  -h, --help                Show this help message" >&2
+            echo "" >&2
+            echo "For longer documents, multiple signatures are created automatically." >&2
+            echo "Each signature can be printed and folded separately, then bound together." >&2
+            echo "" >&2
+            echo "Standard signature sizes:" >&2
+            echo "  16 pages = 4 sheets = compact booklet" >&2
+            echo "  32 pages = 8 sheets = standard booklet (recommended)" >&2
+            echo "  64 pages = 16 sheets = maximum for easy saddle-stitch" >&2
+            exit 0
+            ;;
+        -*)
+            echo "Error: Unknown option: $1" >&2
+            exit 1
+            ;;
+        *)
+            URL="$1"
+            shift
+            ;;
+    esac
+done
+
+# Validate URL argument
+if [ -z "${URL:-}" ]; then
+    echo "Error: URL argument required" >&2
+    echo "Run 'url2booklet --help' for usage information" >&2
+    exit 1
+fi
 
 # Validate URL
 if [[ ! "$URL" =~ ^https?:// ]]; then
@@ -100,10 +158,14 @@ fi
 echo ""
 
 # Step 3: Create booklet
-echo "Step 3/4: Creating booklet..."
+if [ "$SIGNATURE_SIZE" = "0" ]; then
+    echo "Step 3/4: Creating single booklet..."
+else
+    echo "Step 3/4: Creating booklet (signature size: ${SIGNATURE_SIZE} pages)..."
+fi
 BOOKLET_FILE="$OUTPUT_DIR/${FILENAME}-booklet.pdf"
 
-if ! bash "$SCRIPT_DIR/bookletize.sh" "$PDF_FILE" "$BOOKLET_FILE" 2>&1; then
+if ! bash "$SCRIPT_DIR/bookletize.sh" "$PDF_FILE" "$BOOKLET_FILE" "$SIGNATURE_SIZE" 2>&1; then
     echo "" >&2
     echo "Error: Failed to create booklet" >&2
     exit 1
@@ -113,25 +175,61 @@ echo ""
 
 # Step 4: Finish
 echo "Step 4/4: Finalizing..."
-FILE_SIZE=$(du -h "$BOOKLET_FILE" | cut -f1)
-PAGE_COUNT=$(pdftk "$BOOKLET_FILE" dump_data 2>/dev/null | grep NumberOfPages | awk '{print $2}' || echo "?")
 
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✓ Booklet created successfully!"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "   File: $BOOKLET_FILE"
-echo "   Size: $FILE_SIZE"
-echo "   Pages: $PAGE_COUNT"
-echo ""
-echo "Printing instructions:"
-echo "  1. Print double-sided (flip on short edge)"
-echo "  2. Fold in half"
-echo "  3. Staple along the spine"
-echo ""
+# Check if multiple signature files were created
+SIGNATURE_FILES=($(ls "$OUTPUT_DIR/${FILENAME}-booklet-sig"*.pdf 2>/dev/null || true))
 
-# Open PDF if requested
-if [ "$AUTO_OPEN" = "true" ]; then
-    open "$BOOKLET_FILE"
+if [ ${#SIGNATURE_FILES[@]} -gt 0 ]; then
+    # Multiple signatures created
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✓ Multi-signature booklet created successfully!"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "   Created ${#SIGNATURE_FILES[@]} signatures:"
+    for sig_file in "${SIGNATURE_FILES[@]}"; do
+        FILE_SIZE=$(du -h "$sig_file" | cut -f1)
+        PAGE_COUNT=$(pdftk "$sig_file" dump_data 2>/dev/null | grep NumberOfPages | awk '{print $2}' || echo "?")
+        FILENAME_ONLY=$(basename "$sig_file")
+        echo "      $FILENAME_ONLY ($FILE_SIZE, $PAGE_COUNT sheets)"
+    done
+    echo ""
+    echo "Printing instructions:"
+    echo "  1. Print each signature file separately"
+    echo "  2. For each signature: print double-sided (flip on short edge)"
+    echo "  3. Fold each signature in half"
+    echo "  4. Stack signatures in order and bind together"
+    echo "     (You can saddle-stitch each signature separately, or bind all together)"
+    echo ""
+
+    # Open all signature files if requested
+    if [ "$AUTO_OPEN" = "true" ]; then
+        for sig_file in "${SIGNATURE_FILES[@]}"; do
+            open "$sig_file"
+        done
+    fi
+else
+    # Single booklet created
+    FILE_SIZE=$(du -h "$BOOKLET_FILE" | cut -f1)
+    PAGE_COUNT=$(pdftk "$BOOKLET_FILE" dump_data 2>/dev/null | grep NumberOfPages | awk '{print $2}' || echo "?")
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "✓ Booklet created successfully!"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "   File: $BOOKLET_FILE"
+    echo "   Size: $FILE_SIZE"
+    echo "   Pages: $PAGE_COUNT"
+    echo ""
+    echo "Printing instructions:"
+    echo "  1. Print double-sided (flip on short edge)"
+    echo "  2. Fold in half"
+    echo "  3. Staple along the spine"
+    echo ""
+
+    # Open PDF if requested
+    if [ "$AUTO_OPEN" = "true" ]; then
+        open "$BOOKLET_FILE"
+    fi
 fi
